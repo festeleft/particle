@@ -1,10 +1,32 @@
 # dht-monitor
 
-A Particle project named dht-monitor
+A Digitial Humitity and Temperature Monitor using a Spark Core (newer version is a Particle Photon) and a DHT11 sensor.
 
-## Welcome to your project!
+This is what the prototyped project looks like. Pretty simple!
 
-Every new Particle project is composed of 3 important elements that you'll see have been created in your project directory for dht-monitor.
+![Spark Core on a breadboard wired to a DHT11](docs/breadboard.jpg)
+
+## Particle Commands
+
+This project creates two Particle variables: `temperature` and `humidity`
+
+Additionally using the `start` and `stop` commands with the `publish` function you can obtain a stream of Particle events of regularaly updated temperature changes.
+
+### URL examples
+
+Get the current temperature
+`$ curl -G https://api.spark.io/v1/devices/<device id>/temperature -d access_token=<access token>`
+
+Get the current humidity
+`$ curl -G https://api.spark.io/v1/devices/<device id>/humidity -d access_token=<access token>`
+
+Start publishing changes to temerature and humidity at most once a minute
+`$ curl https://api.spark.io/v1/devices/<device id>/publish -d access_token=<access token> -d args=start`
+
+Stop publishing
+`$ curl https://api.spark.io/v1/devices/<device id>/publish -d access_token=<access token> -d args=stop`
+
+## A tour of the project
 
 #### ```/src``` folder:  
 This is the source folder that contains the firmware files for your project. It should *not* be renamed. 
