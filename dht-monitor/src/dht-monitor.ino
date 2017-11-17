@@ -52,7 +52,7 @@ void publish(float humidity, float temperature) {
     data = "[";
     // TODO code simple behaviour
     sprintf(working_buffer,
-        "{metric: \"temperature\", value: \"%.01f\", unit: \"Celcius\"}",
+        "{metric: \"temperature\", value: \"%.01f\", unit: \"Celsius\"}",
         temperature);
     data += working_buffer;
     data += ", ";
