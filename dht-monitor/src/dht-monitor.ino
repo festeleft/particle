@@ -17,40 +17,31 @@
 DHT dht(DHTPIN, DHTTYPE);
 
 int g_publishing = 0; // CHANGEME: set to 0 to have the unit not log after a restart/power failure
-int g_sample_frequency = 5000; // sample once every 5 minutes
+int g_sample_frequency = 60000; // sample once every minute
   // TODO mechanism to dynamically update the sample frequency
   // TODO Idea of temporarily ramping up the frequency while someone is
   //      actively inspecting the data. Could be a simple poll instruction.
 double g_humidity = NAN; // Particle variable
 double g_temperature = NAN; // Particle variable
+int g_first_publish = 0;
 
 int publishCommand(String command) {
    if (command == "start") {
         g_publishing = 1;
-        bool success;
-        success = Particle.publish("info", "starting observations");
-        if (!success) {
-            Serial.println("publish start info failed!!!!");
-        }
+        g_first_publish = 1;
+        Serial.println("publish:start");
+        Particle.publish("info", "starting observations");
         return 1;
    }
    else if (command == "stop") {
-        bool success;
-        success = Particle.publish("info", "stopping observations");
-        if (!success) {
-          Serial.println("publish stop info failed!!!!");
-        }
-        Serial.println("stopping...");
+        Serial.println("publish:stop");
+        Particle.publish("info", "stopping observations");
         g_publishing = 0; // set the flag to not collect observations
         return 1;
    }
 
-    Serial.println("Error (illegal CMD).");
-    bool success;
-    success = Particle.publish("error", "illegal command");
-    if (!success) {
-      Serial.println("publish illegal poll command failed!!!!");
-    }
+    Serial.println("publish:Error (illegal CMD).");
+    Particle.publish("error", "illegal command");
 
     return 0;
 }
@@ -129,12 +120,19 @@ void loop() {
     serial_data += working_buffer;
     Serial.println(serial_data);
 
+    if (g_publishing) {
+        if ((g_first_publish == 1) ||
+            (g_humidity != (double) humidity) ||
+            (g_temperature != (double) temperature)) {
+            // only publish an update if something has changed
+            // or if publishing has just been turned on
+            publish(humidity, temperature);
+            g_first_publish = 0;
+        }
+    }
+
     // update global (particle) variables
     g_temperature = (double) temperature;
     g_humidity = (double) humidity;
 
-    if (g_publishing) {
-        // Success
-        publish(humidity, temperature);
-    }
 }
