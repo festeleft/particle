@@ -10,21 +10,21 @@ This is what the prototyped project looks like. Pretty simple!
 
 This project creates two Particle variables: `temperature` and `humidity`
 
-Additionally using the `start` and `stop` commands with the `publish` function you can obtain a stream of Particle events of regularaly updated temperature changes.
+Additionally using the `start` and `stop` commands with the `publish` function you can obtain a stream of Particle events for _changes_ in temperature or humidity.
 
 ### URL examples
 
 Get the current temperature
-`$ curl -G https://api.spark.io/v1/devices/<device id>/temperature -d access_token=<access token>`
+`$ curl -G https://api.particle.io/v1/devices/<device id>/temperature -d access_token=<access token>`
 
 Get the current humidity
-`$ curl -G https://api.spark.io/v1/devices/<device id>/humidity -d access_token=<access token>`
+`$ curl -G https://api.particle.io/v1/devices/<device id>/humidity -d access_token=<access token>`
 
 Start publishing changes to temerature and humidity at most once a minute
-`$ curl https://api.spark.io/v1/devices/<device id>/publish -d access_token=<access token> -d args=start`
+`$ curl https://api.particle.io/v1/devices/<device id>/publish -d access_token=<access token> -d args=start`
 
 Stop publishing
-`$ curl https://api.spark.io/v1/devices/<device id>/publish -d access_token=<access token> -d args=stop`
+`$ curl https://api.particle.io/v1/devices/<device id>/publish -d access_token=<access token> -d args=stop`
 
 ## A tour of the project
 
