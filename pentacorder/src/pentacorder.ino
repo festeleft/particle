@@ -5,22 +5,140 @@
 * Date:
 */
 
+#include "Adafruit_DHT.h"
+
+struct ObservationType {
+    String name;
+    String unit;
+    int unitMax;
+    int minMin;
+};
+
+class Observations {
+  public:
+    Observations(ObservationType *);
+};
+
+Observations::Observations(ObservationType *types) {
+
+}
+
+struct DoubleSampledObservations {
+  String name;
+  String unit;
+  double first;
+  double last;
+  double min;
+  double max;
+  double average;
+  int sampleCount; // count of sucessful samples computed into average
+  int errorCount; // error count when sampling sensor
+};
+
+struct IntSampledObservations {
+  String name;
+  String unit;
+  int first;
+  int last;
+  int min;
+  int max;
+  double average; // or course, average doesn't have to be an int
+  int sampleCount; // count of sucessful samples computed into average
+  int errorCount; // error count when sampling sensor
+};
+
+void addIntSample(struct IntSampledObservations *samples, int new_value) {
+    if (samples->sampleCount == 0) {
+      // first sample
+      samples->first = new_value;
+      samples->max = new_value;
+      samples->min = new_value;
+      samples->average = new_value;
+    }
+    else {
+      // we have more than one sample so we can compute the
+      // average, max and min
+      if (new_value > samples->max) {
+        samples->max = new_value;
+      }
+
+      if (new_value < samples->min) {
+        samples->min = new_value;
+      }
+
+      samples->average =
+        ((samples->average * samples->sampleCount) + new_value)
+                      /
+          (samples->sampleCount + 1);
+
+    }
+
+    samples->sampleCount += 1;
+    samples->last = new_value;
+}
+
+void addDoubleSample(struct DoubleSampledObservations *samples, double new_value) {
+    if (samples->sampleCount == 0) {
+      // first sample
+      samples->first = new_value;
+      samples->max = new_value;
+      samples->min = new_value;
+      samples->average = new_value;
+    }
+    else {
+      // we have more than one sample so we can compute the
+      // average, max and min
+      if (new_value > samples->max) {
+        samples->max = new_value;
+      }
+
+      if (new_value < samples->min) {
+        samples->min = new_value;
+      }
+
+      samples->average =
+        ((samples->average * samples->sampleCount) + new_value)
+                      /
+          (samples->sampleCount + 1);
+
+    }
+
+    samples->sampleCount += 1;
+    samples->last = new_value;
+}
+
+time_t gFirstObservation = 0;
+time_t gLastObservation = 0;
+
 // BUTTON
 #define BUTTON_UP 0
 #define BUTTON_DOWN 1
 int BUTTON_PIN = D6;
 int gButtonState = BUTTON_UP;
-time_t gBegunPressAt = 0;
+// TODO millis() will overflow after 49 days; use Software Timers instead!!
+unsigned long gBegunPressAt = 0;
 
 // PHOTORECEPTOR
 int PHOTORESISTOR_PIN = A0;
 int PHOTORESISTOR_POWER = A5;
-int gLuminosity = 0;
+// int gLuminosity = 0;
+
+IntSampledObservations gLuminosity = {
+  "luminosity",
+  "%%",
+  0, 0, 0, 0, 0,
+  0
+};
 
 // DHT (Temperature and Humidity)
 // TODO PUT DHT Sensor info here
-// int gTemperature = NAN;
-// int gHumidity = NAN;
+#define DHTPIN D4
+#define DHTTYPE DHT22
+
+DHT dht(DHTPIN, DHTTYPE);
+
+double gTemperature = NAN;
+double gHumidity = NAN;
 
 // LED
 #define LED_ON 1
@@ -44,10 +162,14 @@ int setLED(String command) {
   return 0;
 }
 
-int gPublishing = 0;
+int gObservationFrequency = 5 * 60 * 1000; // default frequency: 5 minutes
+time_t gNextObservation = millis() - 1; // time at/after which to make the next observation
+
+int gPublishing = 1;
+time_t gNextEdition = 0;  // time at/after which to publish the next edition of
+                          // observations.
 int gFirstPublish = 0;
-int gFrequency = 5 * 60 * 1000; // default frequency: 5 minutes
-time_t gNextObservation = 0; // time at/after which to make the next observation
+int gPublishingFrequency = 60 * 60 * 1000; // default 1 hour
 
 int publishingControl(String command) {
    if (command == "start") {
@@ -69,7 +191,7 @@ int publishingControl(String command) {
     return 0;
 }
 
-int setFrequency(String frequency) {
+int setObservationFrequency(String frequency) {
   int new_frequency = atoi(frequency);
   if (new_frequency == 0) {
     // 0 is not a valid frequency
@@ -77,7 +199,10 @@ int setFrequency(String frequency) {
     return 0;
   }
 
-  gFrequency = new_frequency;
+  gObservationFrequency = new_frequency;
+
+  // make sure that we publish an observation on the next loop
+  gNextObservation = millis() - 1;
   return 1;
 }
 
@@ -107,62 +232,117 @@ void setup() {
   digitalWrite(PHOTORESISTOR_POWER, HIGH);
   // We are going to declare a Particle.variable() here so that we can access
   // the value of the photoresistor from the cloud.
-  Particle.variable("luminosity", &gLuminosity, INT);
+  Particle.variable("luminosity", &gLuminosity.last, INT);
 
   // DHT (Humidity & Temperature) SETUP
-  // TODO
+  Particle.variable("temperature", &gTemperature, DOUBLE);
+  Particle.variable("humidity", &gHumidity, DOUBLE);
+  dht.begin();
 
   // PUBLISHING
   Particle.function("publish", publishingControl);
   Particle.variable("publishing", &gPublishing, INT);
 
-  Particle.function("set-freq", setFrequency);
-  Particle.variable("frequency", &gFrequency, INT);
+  Particle.function("set-freq", setObservationFrequency);
+  Particle.variable("frequency", &gObservationFrequency, INT);
 }
 
 void makeObservations() {
   int luminosity_now = 0;
-  char working_buffer[64];
+  float humidity_now = 0,
+    temperature_now = 0;
+
+  // TODO implemnet sampling structure, counter struct,
+  // TODO first/last, sample count, etc
 
   // make new observations; i.e. read sensors
   luminosity_now = analogRead(PHOTORESISTOR_PIN);
 
-  if (gPublishing) {
-    String data;
-    data = "[";
-    // TODO code simple behaviour
-    sprintf(working_buffer,
-        "{metric: \"luminosity\", value: \"%i\", unit: \"Byte\"}",
-        luminosity_now);
-    data += working_buffer;
-
-    //data += ", ";
-    //sprintf(working_buffer,
-    //    "{metric: \"temperature\", value: \"%.01f\", unit: \"Celsius\"}",
-    //    temperature_now);
-    //data += working_buffer;
-
-    //data += ", ";
-    //sprintf(working_buffer,
-    //    "{metric: \"humidity\", value: \"%.01f\", unit: \"%%\"}",
-    //    humidity_now);
-    //data += working_buffer;
-
-    data += "]";
-    Particle.publish("com-cranbrooke-observations", data);
-
-    //if (abs(luminosity_now - gLuminosity) >= 25) {
-      // if the photo resistor value has changed by more than 10% (~25) then
-      // publish an event. This is to avoid unnecessary noise in the publishing
-      // such as clouds, trees, people passing in front of a the sensor, etc.
-    //  sprintf(data, "{new: %i, old: %i}", luminosity_now, gLuminosity);
-    //  Particle.publish("com-cranbrooke-luminosity-change", data);
-    //}
-  }
+  humidity_now = dht.getHumidity();
+  delay(50);
+  temperature_now = dht.getTempCelcius();
 
   // update globals
-  gLuminosity = luminosity_now;
+  //gLuminosity = luminosity_now;
+  addIntSample(&gLuminosity, luminosity_now);
+  gTemperature = (double) temperature_now;
+  gHumidity = (double) humidity_now;
+
 }
+
+
+void publishObservations() {
+  char working_buffer[2048];
+  //char *working_buffer = (char *) malloc(2048);
+  // TODO rewrite to new format
+
+  String data;
+  // start time
+  // end time
+  // number of samples
+  data = "[";
+  // TODO code simple behaviour
+
+  //
+  // SENSORS (Sampled)
+  //
+
+  // average value, last value, max value, min value
+  sprintf(working_buffer,
+      "{\"metric\": \"luminosity\", \"id\"=\"0\", \"value\": \"%i\", \"unit\": \"Byte\"}",
+      gLuminosity.last);
+  data += working_buffer;
+
+  // TODO collect WIFI Strength WiFi.RSSI()
+
+  data += ", ";
+  sprintf(working_buffer,
+      "{\"metric\": \"temperature\", \"id\"=\"0\", \"value\": \"%.01f\", \"unit\": \"Celsius\"}",
+      gTemperature);
+  data += working_buffer;
+
+  data += ", ";
+  sprintf(working_buffer,
+      "{\"metric\": \"humidity\", \"id\"=\"0\", \"value\": \"%.01f\", \"unit\": \"%%\"}",
+      gHumidity);
+  data += working_buffer;
+
+  //
+  // Managed State
+  //
+
+  data += ", ";
+  sprintf(working_buffer,
+      "{\"metric\": \"led\", \"id\"=\"0\", \"value\": \"%i\", \"unit\": \"Boolean\"}",
+      gLEDState);
+  data += working_buffer;
+
+  data += ", ";
+  sprintf(working_buffer,
+      "{\"metric\": \"pushbutton\", \"id\"=\"0\", \"value\": \"%i\", \"unit\": \"Boolean\"}",
+      gButtonState);
+  data += working_buffer;
+
+  data += ", ";
+  sprintf(working_buffer,
+      "{\"metric\": \"collection-frequency\", \"value\": \"%i\", \"unit\": \"Duration\"}",
+      gObservationFrequency);
+  data += working_buffer;
+
+  data += "]";
+  Particle.publish("com-cranbrooke-observations", data);
+  //if (abs(luminosity_now - gLuminosity) >= 25) {
+    // if the photo resistor value has changed by more than 10% (~25) then
+    // publish an event. This is to avoid unnecessary noise in the publishing
+    // such as clouds, trees, people passing in front of a the sensor, etc.
+  //  sprintf(data, "{new: %i, old: %i}", luminosity_now, gLuminosity);
+  //  Particle.publish("com-cranbrooke-luminosity-change", data);
+  //}
+
+  //free(working_buffer);
+}
+
+
 
 void loop() {
 
@@ -188,9 +368,10 @@ void loop() {
 
       // publish a button down event
       // TODO add time stamp to data
-      sprintf(data, "{event: \"pressed\"}", gBegunPressAt);
-      Particle.publish("com-cranbrooke-button", data);
+      sprintf(data, "{\"id\": \"0\"}", gBegunPressAt);
+      Particle.publish("com-cranbrooke-pushbutton-pressed", data);
     }
+
   }
   else {
     // BUTTON UP
@@ -199,25 +380,43 @@ void loop() {
       // TODO add time stamp and duration
       // TODO double click handling?
 
-      sprintf(data, "{event: \"released\", duration: %u}",
+      sprintf(data, "{\"id\": \"0\", duration: %u}",
                     millis() - gBegunPressAt);
-      Particle.publish("com-cranbrooke-button", data);
+      Particle.publish("com-cranbrooke-pushbutton-released", data);
 
       // clear the button state
       gButtonState = BUTTON_UP;
     }
   }
 
-  time_t now = millis();
+  unsigned long now = millis();
+  //
+  // Make Observations when the time is right
+  //
   if (now >= gNextObservation) {
     makeObservations();
     // increment based on the scheduled time of the previous to keep the
     // observations evenly spaced without collection time drift.
-    gNextObservation += gFrequency;
+    gNextObservation += gObservationFrequency;
     if (gNextObservation < now) {
       // a delay occurred and since we don't want/need two observations close
       // together so push out the nextObservation time
-      gNextObservation = millis() + gFrequency;
+      gNextObservation = millis() + gObservationFrequency;
+    }
+  }
+
+  //
+  // Publish Observations when the time is right, if publishing is enabled
+  //
+  if (gPublishing && (now >= gNextEdition)) {
+    publishObservations();
+    // increment based on the scheduled time of the previous to keep the
+    // editions evenly spaced without collection time drift.
+    gNextEdition += gPublishingFrequency;
+    if (gNextEdition < now) {
+      // a delay occurred and since we don't want/need two publications close
+      // together so push out the nextObservation time
+      gNextEdition = millis() + gPublishingFrequency;
     }
   }
 
