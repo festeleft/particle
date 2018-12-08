@@ -19,6 +19,7 @@ This file is the firmware that will run as the primary application on your Parti
 This is the file that specifies the name and version number of the libraries that your project depends on. Dependencies are added automatically to your `project.properties` file when you add a library to a project using the `particle library add` command in the CLI or add a library in the Desktop IDE.
 
 ## Adding additional files to your project
+You need to add the Adafruit_DHT library. If you are using the Particle Workbench plugin to Visual Studio Code then use the "Particle: Add Library" command (CMD-Shift-P).
 
 #### Projects with multiple sources
 If you would like add additional files to your application, they should be added to the `/src` folder. All files in the `/src` folder will be sent to the Particle Cloud to produce a compiled binary.
