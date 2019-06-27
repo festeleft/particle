@@ -28,9 +28,15 @@ enum Mode {
 
 class Component; // forward reference
 
+class Relay {
+  public:
+    virtual void setupRelay();
+    virtual void setRelay(bool closed);
+};
+
 class Thermostat {
  public:
-  Thermostat(Component ** components);
+  Thermostat(Component ** components, Relay * heating_relay, Relay * cooling_relay, Relay * fan_relay);
 
   static constexpr double TEMP_MAX = 30.0f;
   static constexpr double TEMP_MIN = 5.0f;
@@ -62,9 +68,10 @@ class Thermostat {
  private:
   int computeTargetOperatingState();
   Component ** components;
+  Relay * heatingRelay;
+  Relay * coolingRelay;
+  Relay * fanRelay;
 
-
- 
 };
 
 class SensorReading {
@@ -125,7 +132,7 @@ class RotaryController : private Encoder, public Component {
     double computeTargetTemperature(Thermostat * thermostat);
 };
 
-class LatchingRelay : public Component {
+class LatchingRelay : public Relay {
   public:
     LatchingRelay(pin_t on_pin, pin_t off_pin, long relay_latch_pulse_time);
     virtual void setupRelay();
@@ -135,6 +142,7 @@ class LatchingRelay : public Component {
     pin_t onPin, offPin;
     bool isClosed;
     long relayLatchPulseTime;
+
 };
 
 class DHTSensor : private DHT, public Component {

@@ -21,7 +21,8 @@ void Component::drawDisplay(Thermostat * thermostat) {};
 // in case the temperature is high resolution perhaps the preferance needs to passed
 // into the getReadings call
 
-Thermostat::Thermostat(Component ** components) {
+Thermostat::Thermostat(Component ** components, Relay * heating_relay,
+                                                Relay * cooling_relay, Relay * fan_relay) {
   callingForHeat = FALSE;
   callingForCooling = FALSE;
   temperature = 0;
@@ -31,19 +32,13 @@ Thermostat::Thermostat(Component ** components) {
   changingTargetTemperature = FALSE;
 
   this->components = components;
-  
-  // TODO load settings from EEPROM
-
-  // TODO loop through the compoonents and call setup on them
-    // TODO pass the thermostat down to componetns that need to adjust it directly
-    // Iterate and print values of the list
-
-
-
+  heatingRelay = heating_relay;
+  coolingRelay = cooling_relay;
+  fanRelay = fan_relay;  
 }
 
 void Thermostat::setup() {
-  // READ Target Temp from EEPROM; or above?
+  // READ Target Temp from EEPROM
   callingForHeat = FALSE;
   mode = HEAT_ON;
 
@@ -73,13 +68,12 @@ void Thermostat::setup() {
       }
   }
 
-  // set up any relays
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.isRelay) {
-        // TODO this needs to be more complicated for cooling vs heat case
-        component->setRelay(callingForHeat);
-      }
+  // TODO ASSERTION to make sure we don't put heating and cooling on at the same time
+  if (heatingRelay != NULL) {
+    // TODO need proper logic in here for non-heating use cases
+    heatingRelay->setRelay(callingForHeat);
   }
+  // TODO handling Fan and Cooling cases
 }
 
 void Thermostat::loop() {
@@ -91,6 +85,7 @@ void Thermostat::loop() {
       }
   }
 
+  // TODO ASSERTION to make sure we don't put heating and cooling on at the same time
   // allow conterollers to update
   for (Component *component = components[0]; component != NULL; component++) {
       if (component->type.isController) {
@@ -99,12 +94,11 @@ void Thermostat::loop() {
   }
 
   // update relays (call for cold of heat)
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.isRelay) {
-        // TODO this needs to be more complicated for cooling vs heat case
-        component->setRelay(callingForHeat);
-      }
+  if (heatingRelay != NULL) {
+    // TODO need proper logic in here for non-heating use cases
+    heatingRelay->setRelay(callingForHeat);
   }
+  // TODO handling Fan and Cooling cases
 
   // lastly update any displays
   for (Component *component = components[0]; component != NULL; component++) {

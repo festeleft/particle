@@ -39,12 +39,14 @@
 Cranbrooke::ThermostatKit::Component * components[] = {
   new Cranbrooke::ThermostatKit::DHTSensor(DHT_PIN, DHT22),
   new Cranbrooke::ThermostatKit::AdafruitOLEDDisplay(),
-  new Cranbrooke::ThermostatKit::LatchingRelay(THERMOSTAT_ON_PIN, THERMOSTAT_OFF_PIN, 500),
   new Cranbrooke::ThermostatKit::RotaryController(DIAL_PIN_1, DIAL_PIN_2),
   NULL
 };
 
-Cranbrooke::ThermostatKit::Thermostat *Thermostat = new Cranbrooke::ThermostatKit::Thermostat(components);
+Cranbrooke::ThermostatKit::Thermostat *Thermostat
+    = new Cranbrooke::ThermostatKit::Thermostat(components,
+          new Cranbrooke::ThermostatKit::LatchingRelay(THERMOSTAT_ON_PIN, THERMOSTAT_OFF_PIN, 500),
+          NULL, NULL);
 
 int gDebug = FALSE;
 
