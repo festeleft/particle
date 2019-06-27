@@ -8,7 +8,8 @@
 #include "Adafruit_DHT.h"
 
 #define DHTPIN D1    // CHANGEME: Digital Pin on your board that the DHT sensor is connected to
-#define DHTTYPE DHT11 // CHANGEME: To the type of DHT sensor you are using
+//#define DHTTYPE DHT11 // CHANGEME: To the type of DHT sensor you are using
+#define DHTTYPE DHT22 // CHANGEME: To the type of DHT sensor you are using
 
 #define ERROR_READING_HUMIDITY 1
 #define ERROR_READING_TEMPERATURE 2
@@ -16,8 +17,8 @@
 
 DHT dht(DHTPIN, DHTTYPE);
 
-int g_publishing = 0; // CHANGEME: set to 0 to have the unit not log after a restart/power failure
-int g_sample_frequency = 60000; // sample once every minute
+int g_publishing = 1; // CHANGEME: set to 0 to have the unit not log after a restart/power failure
+int g_sample_frequency = 60 * 1000; // sample once every minute
   // TODO mechanism to dynamically update the sample frequency
   // TODO Idea of temporarily ramping up the frequency while someone is
   //      actively inspecting the data. Could be a simple poll instruction.
@@ -61,7 +62,7 @@ void publish(float humidity, float temperature) {
         humidity);
     data += working_buffer;
     data += "]";
-    Particle.publish("observations", data);
+    Particle.publish("com-cranbrooke-observations", data);
 }
 
 
