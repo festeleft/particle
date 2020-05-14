@@ -3,12 +3,15 @@
         "extensions.ignoreRecommendations": true,
         "C_Cpp.default.configurationProvider": "particle.particle-vscode-core",
         "files.associations": {
-            "*.ino": "cpp"
+            "*.ino": "cpp",
+            "algorithm": "cpp",
+            "chrono": "cpp",
+            "limits": "cpp"
         },
         "particle.targetDevice": "Jason",
         "particle.firmwareVersion": "0.8.0-rc.27",
         "particle.targetPlatform": "argon",
-        "cortex-debug.openocdPath": "/Users/psahota/.particle/toolchains/openocd/0.10.0-particle.1/bin/openocd"
+        "cortex-debug.openocdPath": "${command:particle.getDebuggerOpenocdPath}"
     },
     "folders": [
         {

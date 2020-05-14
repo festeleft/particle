@@ -5,7 +5,7 @@
 #include <FreeSans18pt7b.h>
 #include <FreeSans12pt7b.h>
 #include <FreeSans9pt7b.h>
-#include <Adafruit_DHT_Particle.h>
+#include <PietteTech_DHT.h>
 #include <Encoder.h>
 
 namespace Cranbrooke {
@@ -20,37 +20,43 @@ enum DisplayState {
 
 enum Mode {
   ALL_OFF = 0,
-  HEAT_ON = 1,
-  COOLING_ON = 2,
-  FAN_ON = 3,
-  FAN_CIRCULATE = 4
+  HEAT_ON = 1
+//  COOLING_ON = 2,
+//  FAN_ON = 3,
+//  FAN_CIRCULATE = 4
 };
 
 class Component; // forward reference
+class DHTSensor; // forward reference
+class AdafruitOLEDDisplay; // forward reference
 
 class Relay {
   public:
     virtual void setupRelay();
-    virtual void setRelay(bool closed);
+    virtual void closeRelay(bool closed);
 };
 
 class Thermostat {
+
  public:
-  Thermostat(Component ** components, Relay * heating_relay, Relay * cooling_relay, Relay * fan_relay);
+  Thermostat(DHTSensor * sensor, AdafruitOLEDDisplay * display,
+        Relay * heating_relay, Relay * cooling_relay, Relay * fan_relay);
 
   static constexpr double TEMP_MAX = 30.0f;
   static constexpr double TEMP_MIN = 5.0f;
 
   enum Mode mode;
 
-  enum DisplayState displayState;
+  enum DisplayState displayState = CURRENT_TEMPERATURE;
 
   void setup();
   void loop();
 
   double stepTargetTemperature(int steps);
+  double calculateTemperatureStep(int steps);
+  double setTargetTemperature(double newTarget);
 
-  // we need the heat to be on to reach the traget temperature
+  // we need the heat to be on to reach the target temperature
   bool callingForHeat;
   // we need the cooling to be on to reach the target temperature
   bool callingForCooling;
@@ -58,6 +64,8 @@ class Thermostat {
   double temperature;
   // current humidity at the thermostat
   double humidity;
+  // error on last read
+  bool error;
   // temperature that we are heating or cooling to
   double targetTemperature;
   // working uncommited temperature when adjusting the target temperature
@@ -67,7 +75,8 @@ class Thermostat {
 
  private:
   int computeTargetOperatingState();
-  Component ** components;
+  DHTSensor * sensor;
+  Component * display;
   Relay * heatingRelay;
   Relay * coolingRelay;
   Relay * fanRelay;
@@ -77,6 +86,8 @@ class Thermostat {
 class SensorReading {
   public: 
     int sensorId; // internal id of the sensor within the component
+    // TODO add support for name in constructor
+    String name; // human readable name of sensor
     enum Type {
       TEMPERATURE = 0,
       HUMIDITY = 1,
@@ -85,15 +96,24 @@ class SensorReading {
       LUMINOSITY = 4,
       PARTICULATES = 5
     } type;
-    double value;
+    String typeName[6] = {
+      "Temperature",
+      "Humidity",
+      "Pressure",
+      "Water",
+      "Luminosity",
+      "Particulates"
+    }; 
+    double value = 0.0;
+    boolean error = TRUE;
 };
 
 class Component {
   public:
     // Use bits fields instead of inheritance to define bevaviour for efficiency
-    struct Type {
-      bool hasSensors : 1, isController : 1, isRelay : 1, isDisplay : 1;
-    } type;
+    struct Types {
+      int sensorCount : 4, hasControllers : 1, hasDisplay : 1;
+    } types;
 
     virtual void sensorSetup();
     virtual SensorReading * getReadings(); // return a list of sensors and their most current readings
@@ -119,43 +139,32 @@ class AdafruitOLEDDisplay : private OledWingAdafruit, public Component {
     virtual void drawDisplay(Thermostat* thermostat);
 };
 
-class RotaryController : private Encoder, public Component {
+class NonLatchingRelay : public Relay {
   public:
-    RotaryController(pin_t pin1, pin_t pin2);
-    virtual void controllerSetup(Thermostat* thermostat);
-    virtual void controllerLoop(Thermostat* thermostat);
-    long referencePosition;
-    time_t lastMod;
-    double currentPosition;
-
-  private:
-    double computeTargetTemperature(Thermostat * thermostat);
-};
-
-class LatchingRelay : public Relay {
-  public:
-    LatchingRelay(pin_t on_pin, pin_t off_pin, long relay_latch_pulse_time);
+    NonLatchingRelay(pin_t pin);
     virtual void setupRelay();
-    virtual void setRelay(bool closed);
+    virtual void closeRelay(bool closed);
 
   private:
-    pin_t onPin, offPin;
-    bool isClosed;
-    long relayLatchPulseTime;
-
+    pin_t pin;
+    bool isClosed = FALSE;
 };
 
-class DHTSensor : private DHT, public Component {
+class DHTSensor : public Component {
   public:
     DHTSensor(pin_t pin, uint8_t type);
-    void sensorSetup();
+    void setupSensor();
     SensorReading* getReadings();
 
   private:
+    PietteTech_DHT dht;
     SensorReading readings[2];
-    time_t lastReading;
+    bool read = FALSE; // past tense of read, "red"
+    unsigned int nextReading = 0;
+    bool sampleStarted;
     
 };
+
 
 }
 }

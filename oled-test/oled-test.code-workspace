@@ -7,7 +7,8 @@
         },
         "particle.targetDevice": "Jason",
         "particle.firmwareVersion": "0.8.0-rc.27",
-        "particle.targetPlatform": "argon"
+        "particle.targetPlatform": "argon",
+        "cortex-debug.openocdPath": "/Users/psahota/.particle/toolchains/openocd/0.10.0-particle.1/bin/openocd"
     },
     "folders": [
         {

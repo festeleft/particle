@@ -5,9 +5,9 @@
         "files.associations": {
             "*.ino": "cpp"
         },
-        "particle.targetDevice": "Jason",
-        "particle.firmwareVersion": "0.8.0-rc.27",
-        "particle.targetPlatform": "argon"
+        "particle.targetDevice": "Argonaut-1",
+        "particle.firmwareVersion": "0.8.0-rc.25",
+        "particle.targetPlatform": "xenon"
     },
     "folders": [
         {

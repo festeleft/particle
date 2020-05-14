@@ -21,7 +21,7 @@ void Component::drawDisplay(Thermostat * thermostat) {};
 // in case the temperature is high resolution perhaps the preferance needs to passed
 // into the getReadings call
 
-Thermostat::Thermostat(Component ** components, Relay * heating_relay,
+Thermostat::Thermostat(DHTSensor * sensor, AdafruitOLEDDisplay * display, Relay * heating_relay,
                                                 Relay * cooling_relay, Relay * fan_relay) {
   callingForHeat = FALSE;
   callingForCooling = FALSE;
@@ -31,7 +31,8 @@ Thermostat::Thermostat(Component ** components, Relay * heating_relay,
   targetTemperature = 20.0;
   changingTargetTemperature = FALSE;
 
-  this->components = components;
+  this->sensor = sensor;
+  this->display = display;
   heatingRelay = heating_relay;
   coolingRelay = cooling_relay;
   fanRelay = fan_relay;  
@@ -40,76 +41,70 @@ Thermostat::Thermostat(Component ** components, Relay * heating_relay,
 void Thermostat::setup() {
   // READ Target Temp from EEPROM
   callingForHeat = FALSE;
-  mode = HEAT_ON;
+  mode = ALL_OFF;
 
   // Set up any displays
   // we do this first so that a user can see something
   // while the rest fo the setup is happening.
   // This is the opposite of the loop behaviour where we
   // update the display very last.
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.isDisplay) {
-        // TODO this needs to be more complicated for cooling vs heat case
-        component->displaySetup(this);
-      }
-  }
- 
-  // Set up sensors
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.hasSensors) {
-        component->sensorSetup();
-      }
-  }
-
-  // set up controllers
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.isController) {
-        component->controllerSetup(this);
-      }
-  }
-
+  Serial.println("D1");
+  sensor->setupSensor();
+  Serial.println("D2");
+  display->displaySetup(this);
+  Serial.println("D4");
   // TODO ASSERTION to make sure we don't put heating and cooling on at the same time
   if (heatingRelay != NULL) {
     // TODO need proper logic in here for non-heating use cases
-    heatingRelay->setRelay(callingForHeat);
+    heatingRelay->setupRelay();
+    heatingRelay->closeRelay(callingForHeat);
   }
   // TODO handling Fan and Cooling cases
 }
+
+system_tick_t nextUpdate = millis() + 10000;
 
 void Thermostat::loop() {
+  // check for controller inputs (POT rotation, button presses)
+  display->controllerLoop(this);
+
   // get sensor readings
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.hasSensors) {
-        //READ sensor
-        // component->getReadings();
-      }
+  SensorReading * readings = sensor->getReadings();
+  if (!readings[0].error) {
+    temperature = readings[0].value;
+    humidity = readings[1].value;
+    error = FALSE;
+  }
+  else {
+    Serial.println("error reading temp");
+    return;
   }
 
-  // TODO ASSERTION to make sure we don't put heating and cooling on at the same time
-  // allow conterollers to update
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.isController) {
-        component->controllerLoop(this);
-      }
-  }
-
-  // update relays (call for cold of heat)
-  if (heatingRelay != NULL) {
-    // TODO need proper logic in here for non-heating use cases
-    heatingRelay->setRelay(callingForHeat);
-  }
+  // TODO need refactoring to support proper bitfield return of operating state
   // TODO handling Fan and Cooling cases
+  int computed_state = computeTargetOperatingState();
+  if (computed_state != callingForHeat) {
+    callingForHeat = computed_state;
+    // update the relay
+    if (heatingRelay != NULL) {
+      heatingRelay->closeRelay(callingForHeat);
+    }
+    if (callingForHeat) {
+      mode = HEAT_ON;
+    }
+    else {
+      mode = ALL_OFF;        
+    }
+    
+    Serial.println("changing relay state");
+  }
 
   // lastly update any displays
-  for (Component *component = components[0]; component != NULL; component++) {
-      if (component->type.isDisplay) {
-        // TODO this needs to be more complicated for cooling vs heat case
-        component->drawDisplay(this);
-      }
-  }
+  display->drawDisplay(this);
 
 }
 
+// TODO change return value to include bits for clling for heart/cool/fan
 int Thermostat::computeTargetOperatingState() {
   if (targetTemperature == NAN) {
     // don't have a valid temperature
@@ -117,11 +112,11 @@ int Thermostat::computeTargetOperatingState() {
     return FALSE;
   }
   
-  if (DEBUG) {
-     char buffer [1024];
-     sprintf(buffer, "computeOS: temperature = %f, targetTemp: %f", temperature, targetTemperature);
-    Serial.println(buffer);
-  }
+  //if (DEBUG) {
+  //   char buffer [1024];
+  //   sprintf(buffer, "computeOS: temperature = %f, targetTemp: %f", temperature, targetTemperature);
+  //  Serial.println(buffer);
+  //}
 
   // On/Off Range
   // We don’t want the fireplace turning on and off all the time so we let the
@@ -129,16 +124,16 @@ int Thermostat::computeTargetOperatingState() {
   // before we turn it on again. +/-0.5ºC is the minimum granularity based on
   // the sensitivity of the sensor we are using so we’ll use that.
   if (temperature >= (targetTemperature + 0.5)) {
-    if (DEBUG) Serial.println("debug: computing OperatingState to Off");
+    //if (DEBUG) Serial.println("debug: computing OperatingState to Off");
     return FALSE;
   }
   else if (temperature <= (targetTemperature - 0.5) ) {
-    if (DEBUG) Serial.println("debug: computing OperatingState to On");
+    //if (DEBUG) Serial.println("debug: computing OperatingState to On");
     return TRUE;
   }
   else {
     // leave it at whatever the current state is
-    if (DEBUG) Serial.println("debug: leaving the operating state the way it is");
+    //if (DEBUG) Serial.println("debug: leaving the operating state the way it is");
     return callingForHeat;
   }
 }
@@ -150,9 +145,18 @@ int Thermostat::computeTargetOperatingState() {
 // if called from a push button this would be 1
 // if from a dial or slider then this could be many
 //
+double Thermostat::calculateTemperatureStep(int steps) {
+  return max(min(targetTemperature + steps * 0.5, TEMP_MAX), TEMP_MIN);
+}
+
 double Thermostat::stepTargetTemperature(int steps) {
   // TODO HANDLE FARENHEIGHT step by 1 degree instead of 0.5
-  return max(min(targetTemperature + steps * 0.5, TEMP_MAX), TEMP_MIN);
+  return setTargetTemperature(calculateTemperatureStep(steps));
+}
+
+double Thermostat::setTargetTemperature(double new_target) {
+  targetTemperature = max(min(new_target, TEMP_MAX), TEMP_MIN);
+  return targetTemperature;
 }
 
 //
@@ -165,9 +169,9 @@ struct GFXBoundingBox {
 };
 
 AdafruitOLEDDisplay::AdafruitOLEDDisplay() {
-  type.hasSensors = FALSE;
-  type.isDisplay = TRUE;
-  type.isController = TRUE;
+  types.sensorCount = 0;
+  types.hasDisplay = TRUE;
+  types.hasControllers = TRUE;
 };
 
 void AdafruitOLEDDisplay::controllerLoop(Thermostat* thermostat) {
@@ -181,193 +185,201 @@ void AdafruitOLEDDisplay::displaySetup(Thermostat* thermostat) {
   setTextSize(1);
   setTextColor(WHITE);
   setCursor(15, 24);
+  setRotation(2); // Rotate to flip
 	println("Festeworks");
 	display();
 }
 
 void AdafruitOLEDDisplay::drawDisplay(Thermostat * thermostat) {
-  char valueBuffer[5];
-  char suffixBuffer[5];
+  char tempIntBuffer[10];
+  char tempFractionBuffer[10];
+  char humidityBuffer[10];
+  char targetIntBuffer[10];
+  char targetFractionBuffer[10];
 
   clearDisplay();
 	setTextColor(WHITE);
 
-  double displayValue;
-  char const * displayText = NULL;
-
-  switch (thermostat->displayState) {
-  case TARGET_TEMPERATURE:
-    displayValue = thermostat->transientTemperature; // TODO this call needs to be abstracted from dial
-    if (thermostat->mode == HEAT_ON)
-      displayText = "Heat to";
-    else {
-      displayText = "Cool to";
-    }
-    break;
-  case CURRENT_HUMIDITY:
-    displayValue = thermostat->humidity;
-    break;
-  default: // case CURRENT_TEMPERATURE:
-    displayValue = thermostat->temperature;
-    if (thermostat->mode == ALL_OFF)
-      displayText = "Off";
-    break;  
-  }
-
-  // layout current temperature
-  // integer part of temperature or humidity in 24pt
-  if (displayText) {
-    // draw operating state
-    setCursor(0, 12);
-    setFont(&FreeSans9pt7b);
-    setCursor(0, 31);
-    print(displayText);
-  }
-
-  if (thermostat->displayState != ERROR) {
-    // Draw current number
-    // actually place this right justified and vertically centered on the 128x32
-    // display
-    // gDisplay.setCursor(127 - intBounds.width - decBounds.width, (32 -
-    // intBounds.height) / 2 + intBounds.height);
-    // extract the decimal so that we can draw it smaller
-    sprintf(valueBuffer, "%2.0f", displayValue);
-    int intValue = (int) displayValue;  // lose the decimal
-    if (thermostat->displayState == TARGET_TEMPERATURE || thermostat->displayState == CURRENT_TEMPERATURE) {
-      sprintf(suffixBuffer, ".%d",
-          (int)((displayValue - (double)intValue) * 10.0));
-    }
-    else {
-      // assert(gState.display == CURRENT_HUMIDITY);
-      sprintf(suffixBuffer, "%%");
-    }
-    setFont(&FreeSans18pt7b);
-    GFXBoundingBox intBounds;
-    getTextBounds(valueBuffer, 0, 32, &intBounds.x1, &intBounds.y1,
-                          &intBounds.width, &intBounds.height);
-
-    setFont(&FreeSans12pt7b);
-    GFXBoundingBox decBounds;
-    getTextBounds(suffixBuffer, 0, 32, &decBounds.x1, &decBounds.y1,
-                          &decBounds.width, &decBounds.height);
-
-    setCursor(115 - intBounds.width - decBounds.width, 31);
-    setFont(&FreeSans18pt7b);
-    print(valueBuffer);
-    setFont(&FreeSans12pt7b);
-    print(suffixBuffer);
+  // seperate temperature integer and decimal components in order to draw the
+  // decimal in a smaller font.
+  sprintf(tempIntBuffer, "%2.0f.", thermostat->temperature);
+  int intValue = (int) thermostat->temperature;  // lose the decimal
+  sprintf(tempFractionBuffer, "%d",
+        (int)((thermostat->temperature - (double)intValue) * 10.0));
  
-  }
+  sprintf(humidityBuffer, "%2.0f%%", thermostat->humidity);
+
+  sprintf(targetIntBuffer, "%2.0f.", thermostat->targetTemperature);
+  intValue = (int) thermostat->targetTemperature;  // lose the decimal
+  sprintf(targetFractionBuffer, "%d",
+        (int)((thermostat->targetTemperature - (double)intValue) * 10.0));
+
+  setFont(&FreeSans18pt7b);
+  setCursor(0, 29);
+  print(tempIntBuffer);
+  setFont(&FreeSans12pt7b);
+  print(tempFractionBuffer);
+
+  setFont();
+  print("  ");
+  print(humidityBuffer);
+
+  setFont();
+  setCursor(85, 0);
+  print("Heat to");
+
+  setFont(&FreeSans9pt7b);
+  GFXBoundingBox ttBounds;
+  getTextBounds(targetIntBuffer, 0, 32, &ttBounds.x1, &ttBounds.y1,
+                          &ttBounds.width, &ttBounds.height);
+  setCursor(127 - ttBounds.width - 8, 29); // remove an addition 6 for single char in default font
+  print(targetIntBuffer);
+  setFont();
+  print(targetFractionBuffer);
 
 	display();
 }
 
-// pass the pin1, pin2 call to the base class Encoder contructor
-RotaryController::RotaryController(pin_t pin1, pin_t pin2) : Encoder(pin1, pin2) {
-    referencePosition  = 0;
-    lastMod = 0;
-    currentPosition = 0.0;
-    type.isController = TRUE;
+NonLatchingRelay::NonLatchingRelay(pin_t latch_pin) {
+  pin = latch_pin;
 }
 
-void RotaryController::controllerLoop(Thermostat * thermostat) {
-    // Handle Dial Rotation
-  currentPosition = read();
-  if (currentPosition != referencePosition) {
-    // bump up or down by 0.5 for each two positions up or down
-    // above logic makes sure that a partial click is ignored
-    thermostat->changingTargetTemperature = TRUE;
-    thermostat->displayState = TARGET_TEMPERATURE;
-    lastMod = millis();
-    // Serial.println(newPosition);
-  }
-  else if (thermostat->changingTargetTemperature && (millis() - lastMod > 3000)) {
-    // dial has not been modified for more that 3 seconds
-    thermostat->changingTargetTemperature = FALSE;
-
-    // no target temperature above 30 degrees; no temperature below 5
-    thermostat->targetTemperature = computeTargetTemperature(thermostat);
-    thermostat->displayState = CURRENT_TEMPERATURE;
-    referencePosition = currentPosition;
-    //TODO write changes in targetTemp to EEPROM
-  }
-
-}
-
-// Take a delta position and calculate a new target temperature
-// based on 4 positions temperature step value
-// if the temperature hits the min or max then we should reset the
-// reference position so that spinning it the otherway will yield
-// immediate benefit.
-double RotaryController::computeTargetTemperature(Thermostat * thermostat) {
-  // no target temperature above 30 degrees; no temperature below 5
-  //return max(min(gTargetTemp + gtempDelta, 30.0), 5.0);
-  double newTemp = thermostat->stepTargetTemperature((currentPosition - referencePosition) / 4);
-  if (newTemp == Thermostat::TEMP_MAX || newTemp == Thermostat::TEMP_MIN) {
-    // reset the reference position
-    referencePosition = currentPosition;
-  }
-  return newTemp;
-}
-
-LatchingRelay::LatchingRelay(pin_t on_pin, pin_t off_pin, long relay_latch_pulse_time) {
-  isClosed = FALSE;
- 
-  onPin = on_pin;
-  offPin = off_pin;
-  relayLatchPulseTime = relay_latch_pulse_time;
-}
-
-void LatchingRelay::setupRelay() {
+void NonLatchingRelay::setupRelay() {
   // for a latching relay we have a pin to to specifc change/
   // to each specific state
-  pinMode(onPin, OUTPUT);
-  pinMode(offPin, OUTPUT);
+  pinMode(pin, OUTPUT);
 
-  digitalWrite(onPin, LOW);
-  digitalWrite(offPin, LOW);
+  digitalWrite(pin, LOW);
+  Serial.print("relay pin: ");
+  Serial.print(pin);
 }
 
-void LatchingRelay::setRelay(bool closed) {
+void NonLatchingRelay::closeRelay(bool closed) {
   if (isClosed == closed) {
     // we are already in the target state so exit
     return;
   }
 
-  int pin;
-  if (closed) {
-    pin = onPin;
+  isClosed = closed;
+  if (isClosed) {
+    digitalWrite(pin, HIGH);
+    Serial.println("setting relay pin high");
+    Serial.print("   pin: ");
+    Serial.println(pin);
   }
   else {
-    pin = offPin;
+   digitalWrite(pin, LOW);
+    Serial.println("setting relay pin low");
   }
-
-  // pulse the appropriate pin to toggle the latching relay
-  digitalWrite(pin, HIGH);
-  delay(relayLatchPulseTime);
-  digitalWrite(pin, LOW);
 }
 
-DHTSensor::DHTSensor(pin_t pin, uint8_t type) : DHT(pin, type) {
-  readings[0].sensorId = 1;
+DHTSensor::DHTSensor(pin_t pin, uint8_t type) {
+  types.sensorCount = 2;
+  sampleStarted = FALSE;
+  dht = PietteTech_DHT(pin, type);
+
+  readings[0].name = "Temperature";
+  readings[0].sensorId = 0;
   readings[0].type = SensorReading::TEMPERATURE;
   readings[0].value = -99;
 
+  readings[1].name = "Humidity";
   readings[1].sensorId = 1;
   readings[1].type = SensorReading::HUMIDITY;
   readings[1].value = -99;
 }
 
-void DHTSensor::sensorSetup() {
+void DHTSensor::setupSensor() {
   // call begin from DHT base class
-  begin();
+  dht.begin();
 }
 
-SensorReading* getReadings() {
-  // TODO READING CODE
+SensorReading * DHTSensor::getReadings() {
+  if (millis() > nextReading) {
+    // we are not currently reading the sensor
+    // and it is past time to start another reading
+    // so start a new reading if we are not in the middle of one
 
-  return NULL;
+    if (!sampleStarted) {
+      // we are not currently reading the sensor
+      // and it is past time to start another reading
+      // so start a new reading
+      Serial.println("starting to aquire");
+      dht.acquire();
+      sampleStarted = TRUE;
+      read = FALSE;
+    }
+    else {
+      Serial.println("new sample already started");
+    }
+
+    if (!dht.acquiring()) {
+      int status = dht.getStatus();
+
+      if (status == DHTLIB_OK) {
+        readings[0].value = dht.getCelsius();
+        readings[1].value = dht.getHumidity();
+        readings[0].error = FALSE;
+        readings[1].error = FALSE;
+        Serial.println(readings[0].name);
+        Serial.print(" ");
+        Serial.println(readings[0].value);
+
+        Serial.println(readings[1].name);
+        Serial.print(" ");
+        Serial.println(readings[1].value);
+      }
+      else {
+        Serial.println("ERROR reading sensor");
+
+        Serial.print("Read sensor: ");
+        switch (status) {
+          case DHTLIB_ERROR_CHECKSUM:
+            Serial.println("Error\n\r\tChecksum error");
+            break;
+          case DHTLIB_ERROR_ISR_TIMEOUT:
+            Serial.println("Error\n\r\tISR time out error");
+            break;
+          case DHTLIB_ERROR_RESPONSE_TIMEOUT:
+            Serial.println("Error\n\r\tResponse time out error");
+            break;
+          case DHTLIB_ERROR_DATA_TIMEOUT:
+            Serial.println("Error\n\r\tData time out error");
+            break;
+          case DHTLIB_ERROR_ACQUIRING:
+            Serial.println("Error\n\r\tAcquiring");
+            break;
+          case DHTLIB_ERROR_DELTA:
+            Serial.println("Error\n\r\tDelta time to small");
+            break;
+          case DHTLIB_ERROR_NOTSTARTED:
+            Serial.println("Error\n\r\tNot started");
+            break;
+          default:
+            Serial.println("Unknown error");
+            break;
+        }
+
+        readings[0].error = TRUE;
+        readings[0].value = -99;
+        readings[1].error = TRUE;
+        readings[1].value = -99;
+      }
+      sampleStarted = FALSE;
+      nextReading = millis() + 5000;
+    }
+  }
+/**
+  else {
+      Serial.println(millis());
+      Serial.print("    next: ");
+      Serial.println(nextReading);
+  }
+**/
+
+  return readings;
 }
+
 
 // namespace close
 }

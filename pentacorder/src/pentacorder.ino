@@ -31,6 +31,7 @@ struct DoubleSampledObservations {
   double min;
   double max;
   double average;
+  double alertThreshold;
   int sampleCount; // count of sucessful samples computed into average
   int errorCount; // error count when sampling sensor
 };
@@ -43,6 +44,7 @@ struct IntSampledObservations {
   int min;
   int max;
   double average; // or course, average doesn't have to be an int
+  int alertThreshold;
   int sampleCount; // count of sucessful samples computed into average
   int errorCount; // error count when sampling sensor
 };
@@ -107,6 +109,16 @@ void addDoubleSample(struct DoubleSampledObservations *samples, double new_value
     samples->last = new_value;
 }
 
+
+//String * IntObservationToJSON(String *working_buffer)
+//  sprintf(working_buffer,
+//    "{\"metric\": \"luminosity\", \"id\"=\"0\", \"value\": \"%i\", \"unit\": \"Byte\"}",
+//    gLuminosity.last);
+
+
+
+// ******************************************
+
 time_t gFirstObservation = 0;
 time_t gLastObservation = 0;
 
@@ -126,8 +138,18 @@ int PHOTORESISTOR_POWER = A5;
 IntSampledObservations gLuminosity = {
   "luminosity",
   "%%",
-  0, 0, 0, 0, 0,
-  0
+  0, 0, 0, 0,
+  MAXINT, 0, 0
+};
+
+// WATER LEVEL
+int WATER_LEVEL_PIN = A4;
+int gWaterLevel = = {
+  "waterlevel",
+  "waterlevel",
+  0, 0, 0, 0,
+  100, // Default Threshold for water is 100; TODO TEST IN REAL WORLD AGAIN
+  0, 0
 };
 
 // DHT (Temperature and Humidity)
@@ -162,7 +184,7 @@ int setLED(String command) {
   return 0;
 }
 
-int gObservationFrequency = 5 * 60 * 1000; // default frequency: 5 minutes
+int gObservationFrequency = 20 * 1000; // default frequency: 20 seconds
 time_t gNextObservation = millis() - 1; // time at/after which to make the next observation
 
 int gPublishing = 1;
@@ -239,6 +261,10 @@ void setup() {
   Particle.variable("humidity", &gHumidity, DOUBLE);
   dht.begin();
 
+  // WATER LEVEL SETUP
+  pinMode(WATER_LEVEL_PIN, INPUT);
+  Particle.variable("waterlevel", &gWaterLevel.last, INT);
+
   // PUBLISHING
   Particle.function("publish", publishingControl);
   Particle.variable("publishing", &gPublishing, INT);
@@ -251,6 +277,7 @@ void makeObservations() {
   int luminosity_now = 0;
   float humidity_now = 0,
     temperature_now = 0;
+  float waterlevel_now = 0;
 
   // TODO implemnet sampling structure, counter struct,
   // TODO first/last, sample count, etc
@@ -262,18 +289,20 @@ void makeObservations() {
   delay(50);
   temperature_now = dht.getTempCelcius();
 
+  waterlevel_now = analogRead(WATER_LEVEL_PIN);
+
   // update globals
   //gLuminosity = luminosity_now;
   addIntSample(&gLuminosity, luminosity_now);
   gTemperature = (double) temperature_now;
   gHumidity = (double) humidity_now;
-
+  addIntSample(&gWaterLevel, waterlevel_now);
 }
 
 
 void publishObservations() {
-  char working_buffer[2048];
-  //char *working_buffer = (char *) malloc(2048);
+  //char working_buffer[2048];
+  char *working_buffer = (char *) malloc(2048);
   // TODO rewrite to new format
 
   String data;
@@ -339,7 +368,7 @@ void publishObservations() {
   //  Particle.publish("com-cranbrooke-luminosity-change", data);
   //}
 
-  //free(working_buffer);
+  free(working_buffer);
 }
 
 
