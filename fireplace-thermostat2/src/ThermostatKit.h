@@ -1,11 +1,15 @@
 #ifndef CRANBROOKE_THERMOSTATKIT__H
 #define CRANBROOKE_THERMOSTATKIT__H
 
-#include <oled-wing-adafruit.h>
+#include "Adafruit_GFX.h"
+#include "Adafruit_SSD1306.h"
+#include "Debounce.h"
 #include <FreeSans18pt7b.h>
 #include <FreeSans12pt7b.h>
 #include <FreeSans9pt7b.h>
+
 #include <PietteTech_DHT.h>
+
 #include <Encoder.h>
 
 namespace Cranbrooke {
@@ -45,6 +49,9 @@ class Thermostat {
   static constexpr double TEMP_MAX = 30.0f;
   static constexpr double TEMP_MIN = 5.0f;
 
+  // delay before transitory mode or target temperature settings take effect
+  static constexpr int CHANGE_DELAY = 5000; // ms
+
   enum Mode mode;
 
   enum DisplayState displayState = CURRENT_TEMPERATURE;
@@ -55,6 +62,8 @@ class Thermostat {
   double stepTargetTemperature(int steps);
   double calculateTemperatureStep(int steps);
   double setTargetTemperature(double newTarget);
+  void cycleMode();
+  void setMode(Mode new_mode);
 
   // we need the heat to be on to reach the target temperature
   bool callingForHeat;
@@ -64,14 +73,16 @@ class Thermostat {
   double temperature;
   // current humidity at the thermostat
   double humidity;
-  // error on last read
-  bool error;
+
   // temperature that we are heating or cooling to
   double targetTemperature;
+
   // working uncommited temperature when adjusting the target temperature
-  double transientTemperature;
-  // a control is in the middle of an uncommitted change to the target temperature
-  bool changingTargetTemperature;
+  double transientTargetTemperature;
+  // working uncommited temperature when adjusting the target temperature
+  Mode transientMode;
+  // keep track if changes are in progress and when they began
+  unsigned long transientValueChanged = 0;
 
  private:
   int computeTargetOperatingState();
@@ -128,15 +139,19 @@ class Component {
     virtual void drawDisplay(Thermostat * thermostat);
 };
 
-class AdafruitOLEDDisplay : private OledWingAdafruit, public Component {
+class AdafruitOLEDDisplay : private Adafruit_SSD1306, public Component {
 
   public:
     AdafruitOLEDDisplay();
 
-    virtual void controllerLoop(Thermostat* thermostat);
-
     virtual void displaySetup(Thermostat* thermostat);
     virtual void drawDisplay(Thermostat* thermostat);
+ 
+  private:
+    static int splitTemperature(double value, int * fracValue);
+    double lastTempDisplayed = -99;
+    double lastTransientTargetTempDisplayed = -99;
+    double lastTransientModeDisplayed = -99;
 };
 
 class NonLatchingRelay : public Relay {

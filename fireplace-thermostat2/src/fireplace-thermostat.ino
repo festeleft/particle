@@ -35,11 +35,6 @@
 #define ERROR_READING_TEMPERATURE 2
 #define ERROR_ILLEGAL_COMMAND 4
 
-//Cranbrooke::ThermostatKit::DHTSensor * DHT = new Cranbrooke::ThermostatKit::DHTSensor(DHT_PIN, DHT22);
-//Cranbrooke::ThermostatKit::AdafruitOLEDDisplay * Display = new Cranbrooke::ThermostatKit::AdafruitOLEDDisplay();
-//new Cranbrooke::ThermostatKit::RotaryController(DIAL_PIN_1, DIAL_PIN_2);
-//Cranbrooke::ThermostatKit::Relay * Relay = new Cranbrooke::ThermostatKit::NonLatchingRelay(D6);
-
 Cranbrooke::ThermostatKit::Thermostat *Thermostat
     = new Cranbrooke::ThermostatKit::Thermostat(
           new Cranbrooke::ThermostatKit::DHTSensor(DHT_PIN, DHT22),
@@ -79,10 +74,21 @@ int setTargetTemperature(String target_str) {
   return 0;
 }
 
+int setMode(String mode) {
+  if (!strcmp(mode, "off")) {
+    Thermostat->setMode(Cranbrooke::ThermostatKit::ALL_OFF);
+    return 0;
+  }
+  if (!strcmp(mode, "heat")) {
+    Thermostat->setMode(Cranbrooke::ThermostatKit::HEAT_ON);
+    return 0;
+  }
+
+  return 1;  
+}
+
 void setup() {
   Serial.begin(9600);            // open the serial port at 9600 bps:
-  Serial.println("\nSetup...");  // prints another carriage return
-
   Thermostat->setup();
 
 /*
@@ -96,26 +102,17 @@ void setup() {
         
   //Particle.variable("Calling4Heat", &gState.callingForHeat, INT);
 
-  delay(5000); // hold up to make sure that setup happens
-
   Particle.variable("targetTemperature", &Thermostat->targetTemperature, DOUBLE);
   Particle.variable("temperature", &Thermostat->temperature, DOUBLE);
   Particle.variable("humidity", &Thermostat->humidity, DOUBLE);
   Particle.variable("callingForHeat", &Thermostat->callingForHeat, BOOLEAN);
 
   Particle.function("setTargetTemperature", &setTargetTemperature);
+  Particle.function("setMode", &setMode);
   
   };
 
 // TODO Blink LED on ERROR
-
-// TODO
-// Draws the following state examples:
-//         22.5
-// Off     22.5
-// Heat to 24.0
-//         58%
-// Error
 
 //
 // Main Event loop
@@ -124,37 +121,5 @@ unsigned int nextUpdate = 0;
 
 void loop() {
   Thermostat->loop();
-  
-  //int failure = 0;
-
-  // update global (particle) variables
-  // gTemperature = (double) temperature;
-  // gHumidity = (double) humidity;
-  // unsigned int now = millis();
-
-/**
-  if (now > nextUpdate) {
-      // READ sensor
-      Serial.println("attempting read");
-      Cranbrooke::ThermostatKit::SensorReading * readings = DHT->getReadings();
-
-      heatrelay->closeRelay(TRUE);
-      //digitalWrite(D6, HIGH);
-
-      nextUpdate = millis() + 5000;
-  }
-  **/
-  /* 
-  int callingForHeat = computeTargetOperatingState();
-  if (callingForHeat != gState.callingForHeat) {
-    gState.callingForHeat = callingForHeat;
-    // set latching relay based operating state
-    setLatchingOperatingState(gState.callingForHeat)
-    ;
-    // gintOpState = (int) goperatingState;
-  }
-
-  drawDisplay();
-*/
 }
 
